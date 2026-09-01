@@ -32,6 +32,7 @@ final class ViewController: UIViewController {
         super.viewDidLoad()
         configureView()
         viewModel.onChange = { [weak self] in self?.render() }
+        viewModel.onError = { [weak self] error in self?.presentPersistenceError(error) }
         viewModel.loadTasks()
     }
 
@@ -89,6 +90,12 @@ final class ViewController: UIViewController {
         for (index, status) in TaskStatus.allCases.enumerated() { statusControl.setTitle("\(status.title) \(counts[status, default: 0])", forSegmentAt: index) }
         statusControl.selectedSegmentIndex = TaskStatus.allCases.firstIndex(of: viewModel.selectedStatus) ?? 0
         collectionView.reloadData()
+    }
+
+    private func presentPersistenceError(_ error: Error) {
+        let alert = UIAlertController(title: "Could Not Save Changes", message: error.localizedDescription, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 
     @objc private func statusChanged() { viewModel.select(status: TaskStatus.allCases[statusControl.selectedSegmentIndex]) }

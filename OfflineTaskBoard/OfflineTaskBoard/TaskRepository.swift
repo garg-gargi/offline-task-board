@@ -1,12 +1,12 @@
 import Foundation
 
 protocol TaskRepository: AnyObject {
-    func fetchTasks() -> [Task]
-    @discardableResult func create(title: String, description: String?, status: TaskStatus) -> Task
-    @discardableResult func update(id: UUID, title: String, description: String?, status: TaskStatus) -> Task?
-    func delete(id: UUID)
-    func move(id: UUID, to status: TaskStatus)
-    func reorder(id: UUID, to index: Int)
+    func fetchTasks() throws -> [Task]
+    @discardableResult func create(title: String, description: String?, status: TaskStatus) throws -> Task
+    @discardableResult func update(id: UUID, title: String, description: String?, status: TaskStatus) throws -> Task?
+    func delete(id: UUID) throws
+    func move(id: UUID, to status: TaskStatus) throws
+    func reorder(id: UUID, to index: Int) throws
 }
 
 final class InMemoryTaskRepository: TaskRepository {
@@ -30,7 +30,7 @@ final class InMemoryTaskRepository: TaskRepository {
         let task = Task(
             id: UUID(), title: title, description: description, status: status,
             createdAt: timestamp, updatedAt: timestamp,
-            sortOrder: tasks(in: status).count, serverVersion: 0
+            sortOrder: Double(tasks(in: status).count), serverVersion: 0
         )
         storedTasks.append(task)
         return task
@@ -44,7 +44,7 @@ final class InMemoryTaskRepository: TaskRepository {
         storedTasks[index].updatedAt = now()
         if originalStatus != status {
             storedTasks[index].status = status
-            storedTasks[index].sortOrder = tasks(in: status).count - 1
+            storedTasks[index].sortOrder = Double(tasks(in: status).count - 1)
             normalizeSortOrders(for: originalStatus)
             normalizeSortOrders(for: status)
         }
@@ -63,7 +63,7 @@ final class InMemoryTaskRepository: TaskRepository {
         let previousStatus = storedTasks[index].status
         guard previousStatus != status else { return }
         storedTasks[index].status = status
-        storedTasks[index].sortOrder = tasks(in: status).count - 1
+        storedTasks[index].sortOrder = Double(tasks(in: status).count - 1)
         storedTasks[index].updatedAt = now()
         normalizeSortOrders(for: previousStatus)
         normalizeSortOrders(for: status)
@@ -78,7 +78,7 @@ final class InMemoryTaskRepository: TaskRepository {
         section.insert(task, at: min(max(index, 0), section.count))
         for (sortOrder, task) in section.enumerated() {
             guard let storedIndex = storedTasks.firstIndex(where: { $0.id == task.id }) else { continue }
-            storedTasks[storedIndex].sortOrder = sortOrder
+            storedTasks[storedIndex].sortOrder = Double(sortOrder)
             if task.id == id { storedTasks[storedIndex].updatedAt = now() }
         }
     }
@@ -94,8 +94,49 @@ final class InMemoryTaskRepository: TaskRepository {
     private func normalizeSortOrders(for status: TaskStatus) {
         for (sortOrder, task) in tasks(in: status).enumerated() {
             guard let index = storedTasks.firstIndex(where: { $0.id == task.id }) else { continue }
-            storedTasks[index].sortOrder = sortOrder
+            storedTasks[index].sortOrder = Double(sortOrder)
         }
+    }
+}
+
+final class PersistentTaskRepository: TaskRepository {
+    private let localDataSource: LocalDataSource
+    private let seedDataSource: CoreDataLocalDataSource
+    private let defaults: UserDefaults
+    private let seedKey = "OfflineTaskBoard.hasSeededCoreData"
+
+    init(
+        localDataSource: CoreDataLocalDataSource = PersistentTaskRepository.makeDefaultDataSource(),
+        defaults: UserDefaults = .standard
+    ) {
+        self.localDataSource = localDataSource
+        self.seedDataSource = localDataSource
+        self.defaults = defaults
+    }
+
+    func fetchTasks() throws -> [Task] {
+        let tasks = try localDataSource.fetchTasks()
+        guard tasks.isEmpty, !defaults.bool(forKey: seedKey) else { return tasks }
+        try seedDataSource.seed(tasks: SampleTasks.all)
+        defaults.set(true, forKey: seedKey)
+        return try localDataSource.fetchTasks()
+    }
+
+    func create(title: String, description: String?, status: TaskStatus) throws -> Task {
+        try localDataSource.create(title: title, description: description, status: status)
+    }
+
+    func update(id: UUID, title: String, description: String?, status: TaskStatus) throws -> Task? {
+        try localDataSource.update(id: id, title: title, description: description, status: status)
+    }
+
+    func delete(id: UUID) throws { try localDataSource.delete(id: id) }
+    func move(id: UUID, to status: TaskStatus) throws { try localDataSource.move(id: id, to: status) }
+    func reorder(id: UUID, to index: Int) throws { try localDataSource.reorder(id: id, to: index) }
+
+    private static func makeDefaultDataSource() -> CoreDataLocalDataSource {
+        do { return CoreDataLocalDataSource(stack: try CoreDataStack()) }
+        catch { fatalError("Unable to load the local task store: \(error)") }
     }
 }
 
@@ -111,7 +152,7 @@ enum SampleTasks {
         task("00000000-0000-0000-0000-000000000008", "Confirm requirements", nil, .done, 1)
     ]
 
-    private static func task(_ id: String, _ title: String, _ description: String?, _ status: TaskStatus, _ sortOrder: Int) -> Task {
+    private static func task(_ id: String, _ title: String, _ description: String?, _ status: TaskStatus, _ sortOrder: Double) -> Task {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         return Task(id: UUID(uuidString: id)!, title: title, description: description, status: status, createdAt: date, updatedAt: date, sortOrder: sortOrder, serverVersion: 0)
     }

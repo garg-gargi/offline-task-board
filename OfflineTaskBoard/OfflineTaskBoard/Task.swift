@@ -21,6 +21,6 @@ struct Task: Identifiable, Equatable {
     var status: TaskStatus
     let createdAt: Date
     var updatedAt: Date
-    var sortOrder: Int
-    var serverVersion: Int
+    var sortOrder: Double
+    var serverVersion: Int64
 }
