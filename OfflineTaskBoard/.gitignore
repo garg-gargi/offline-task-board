@@ -24,6 +24,9 @@ Package.resolved
 # CocoaPods
 Pods/
 
+# Firebase project configuration
+GoogleService-Info.plist
+
 # Fastlane output
 fastlane/report.xml
 fastlane/Preview.html

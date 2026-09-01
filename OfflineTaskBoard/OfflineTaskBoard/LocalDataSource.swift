@@ -30,11 +30,19 @@ enum LocalDataSourceError: Error {
 
 protocol LocalDataSource: AnyObject {
     func fetchTasks() throws -> [Task]
+
     func create(title: String, description: String?, status: TaskStatus) throws -> Task
     func update(id: UUID, title: String, description: String?, status: TaskStatus) throws -> Task?
     func delete(id: UUID) throws
     func move(id: UUID, to status: TaskStatus) throws
     func reorder(id: UUID, to index: Int) throws
+
+    // Sync
+    func fetchPendingOperations() throws -> [PendingOperation]
+    func removePendingOperation(id: UUID) throws
+    func upsertRemoteTask(_ task: Task) throws
+    func deleteLocalTask(id: UUID) throws
+    func markSynced(task: Task, operationId: UUID) throws
 }
 
 final class CoreDataLocalDataSource: LocalDataSource {
@@ -62,6 +70,42 @@ final class CoreDataLocalDataSource: LocalDataSource {
                 }
                 return PendingOperation(id: entity.id, taskId: entity.taskId, type: type, payload: entity.payload, baseVersion: entity.baseVersion, createdAt: entity.createdAt, retryCount: entity.retryCount)
             }
+        }
+    }
+
+    func removePendingOperation(id: UUID) throws {
+        try performMutation { context in
+            guard let operation = try self.pendingOperation(id: id, in: context) else {
+                return
+            }
+
+            context.delete(operation)
+        }
+    }
+
+    func upsertRemoteTask(_ task: Task) throws {
+        try performMutation { context in
+            if let existing = try self.taskEntity(id: task.id, in: context) {
+                existing.title = task.title
+                existing.taskDescription = task.description
+                existing.status = task.status.rawValue
+                existing.createdAt = task.createdAt
+                existing.updatedAt = task.updatedAt
+                existing.sortOrder = task.sortOrder
+                existing.serverVersion = task.serverVersion
+            } else {
+                _ = self.insert(task, in: context)
+            }
+        }
+    }
+
+    func deleteLocalTask(id: UUID) throws {
+        try performMutation { context in
+            guard let entity = try self.taskEntity(id: id, in: context) else {
+                return
+            }
+
+            context.delete(entity)
         }
     }
 
@@ -142,6 +186,26 @@ final class CoreDataLocalDataSource: LocalDataSource {
                 changed.append(task)
             }
             try self.coalesceUpdates(for: changed, in: context)
+        }
+    }
+
+    func markSynced(task: Task, operationId: UUID) throws {
+        try performMutation { context in
+            guard let entity = try self.taskEntity(id: task.id, in: context) else {
+                return
+            }
+
+            entity.title = task.title
+            entity.taskDescription = task.description
+            entity.status = task.status.rawValue
+            entity.createdAt = task.createdAt
+            entity.updatedAt = task.updatedAt
+            entity.sortOrder = task.sortOrder
+            entity.serverVersion = task.serverVersion
+
+            if let operation = try self.pendingOperation(id: operationId, in: context) {
+                context.delete(operation)
+            }
         }
     }
 
@@ -263,6 +327,13 @@ final class CoreDataLocalDataSource: LocalDataSource {
         let request = NSFetchRequest<PendingOperationEntity>(entityName: "PendingOperationEntity")
         request.fetchLimit = 1
         request.predicate = NSPredicate(format: "taskId == %@", taskId as CVarArg)
+        return try context.fetch(request).first
+    }
+
+    private func pendingOperation(id: UUID, in context: NSManagedObjectContext) throws -> PendingOperationEntity? {
+        let request = NSFetchRequest<PendingOperationEntity>(entityName: "PendingOperationEntity")
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
         return try context.fetch(request).first
     }
 }

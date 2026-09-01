@@ -134,6 +134,15 @@ final class PersistentTaskRepository: TaskRepository {
     func move(id: UUID, to status: TaskStatus) throws { try localDataSource.move(id: id, to: status) }
     func reorder(id: UUID, to index: Int) throws { try localDataSource.reorder(id: id, to: index) }
 
+    func makeSyncManager(
+        remote: RemoteDataSource = FirebaseRemoteDataSource()
+    ) -> SyncManager {
+        SyncManager(
+            local: localDataSource,
+            remote: remote
+        )
+    }
+
     private static func makeDefaultDataSource() -> CoreDataLocalDataSource {
         do { return CoreDataLocalDataSource(stack: try CoreDataStack()) }
         catch { fatalError("Unable to load the local task store: \(error)") }
