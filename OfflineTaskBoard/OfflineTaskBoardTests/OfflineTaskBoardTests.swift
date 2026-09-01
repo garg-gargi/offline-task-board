@@ -1,36 +1,70 @@
-//
-//  OfflineTaskBoardTests.swift
-//  OfflineTaskBoardTests
-//
-//  Created by Aditya Sinha on 01/09/26.
-//
-
 import XCTest
 @testable import OfflineTaskBoard
 
 final class OfflineTaskBoardTests: XCTestCase {
-
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
+    func testCreateTaskAddsTaskToSelectedStatus() {
+        let viewModel = makeViewModel()
+        XCTAssertTrue(viewModel.createTask(title: "Write tests", description: "Cover board behavior", status: .todo))
+        viewModel.select(status: .todo)
+        XCTAssertEqual(viewModel.visibleTasks.map(\.title), ["Write tests"])
     }
 
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
+    func testNewTaskDefaultsToToDoRegardlessOfSelectedBoardStatus() {
+        let viewModel = makeViewModel()
+        viewModel.select(status: .done)
+        XCTAssertTrue(viewModel.createTask(title: "Starts in To Do", description: nil))
+        viewModel.select(status: .todo)
+        XCTAssertEqual(viewModel.visibleTasks.map(\.title), ["Starts in To Do"])
     }
 
-    func testExample() throws {
-        // This is an example of a functional test case.
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // Any test you write for XCTest can be annotated as throws and async.
-        // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
-        // Mark your test async to allow awaiting for asynchronous code to complete. Check the results with assertions afterwards.
+    func testUpdateTaskChangesContentAndStatus() {
+        let task = makeTask(title: "Draft")
+        let viewModel = makeViewModel(tasks: [task])
+        XCTAssertTrue(viewModel.updateTask(id: task.id, title: "Published draft", description: "Ready", status: .done))
+        viewModel.select(status: .done)
+        XCTAssertEqual(viewModel.visibleTasks.first?.title, "Published draft")
+        XCTAssertEqual(viewModel.visibleTasks.first?.description, "Ready")
     }
 
-    func testPerformanceExample() throws {
-        // This is an example of a performance test case.
-        self.measure {
-            // Put the code you want to measure the time of here.
-        }
+    func testDeleteTaskRemovesIt() {
+        let task = makeTask(title: "Remove me")
+        let viewModel = makeViewModel(tasks: [task])
+        viewModel.deleteTask(id: task.id)
+        XCTAssertTrue(viewModel.visibleTasks.isEmpty)
     }
 
+    func testMoveTaskChangesStatusAndAppendsToDestination() {
+        let todo = makeTask(title: "To do", status: .todo, sortOrder: 0)
+        let progress = makeTask(title: "In progress", status: .inProgress, sortOrder: 0)
+        let viewModel = makeViewModel(tasks: [todo, progress])
+        viewModel.moveTask(id: todo.id, to: .inProgress)
+        viewModel.select(status: .inProgress)
+        XCTAssertEqual(viewModel.visibleTasks.map(\.title), ["In progress", "To do"])
+    }
+
+    func testReorderTaskUpdatesSortOrder() {
+        let first = makeTask(title: "First", sortOrder: 0)
+        let second = makeTask(title: "Second", sortOrder: 1)
+        let third = makeTask(title: "Third", sortOrder: 2)
+        let viewModel = makeViewModel(tasks: [first, second, third])
+        viewModel.reorderTask(id: third.id, to: 0)
+        XCTAssertEqual(viewModel.visibleTasks.map(\.title), ["Third", "First", "Second"])
+    }
+
+    func testEmptyTitleIsRejected() {
+        let viewModel = makeViewModel()
+        XCTAssertFalse(viewModel.createTask(title: "  ", description: nil, status: .todo))
+        XCTAssertTrue(viewModel.visibleTasks.isEmpty)
+    }
+
+    private func makeViewModel(tasks: [Task] = []) -> TaskBoardViewModel {
+        let repository = InMemoryTaskRepository(tasks: tasks, now: { Date(timeIntervalSince1970: 42) })
+        let viewModel = TaskBoardViewModel(repository: repository)
+        viewModel.loadTasks()
+        return viewModel
+    }
+
+    private func makeTask(title: String, status: TaskStatus = .todo, sortOrder: Int = 0) -> Task {
+        Task(id: UUID(), title: title, description: nil, status: status, createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 0), sortOrder: sortOrder, serverVersion: 0)
+    }
 }
